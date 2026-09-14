@@ -24,12 +24,7 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     repo_url TEXT NULL,
     -- SHA-256 hex of the API key. The raw key is never stored anywhere.
-    -- UNIQUE for two reasons at once: one key must identify exactly one
-    -- project (two projects sharing a key would leave evaluate/sync with no
-    -- correct tenant to serve), and the uniqueness index is what makes that
-    -- per-request hash lookup fast. Enforced here, not in application code,
-    -- so no race or code path can create the ambiguity.
-    api_key_hash TEXT NOT NULL UNIQUE,
+    api_key_hash TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -71,3 +66,14 @@ CREATE TABLE IF NOT EXISTS audit_log_entries (
     new_value TEXT NOT NULL,
     "timestamp" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- One key identifies exactly one project: two projects sharing a hash would
+-- leave evaluate/sync with no correct tenant to serve, so the constraint
+-- lives in storage, not application code. It is a standalone CREATE INDEX
+-- (not inline UNIQUE) on purpose: CREATE TABLE IF NOT EXISTS never upgrades
+-- an existing table, so an inline constraint would silently miss every
+-- database created before it. This statement runs on every connect and lands
+-- on old and new databases alike. If it ever fails, an old database already
+-- holds duplicate hashes -- genuinely ambiguous data that must be repaired
+-- by hand, and failing loudly is the correct response to that.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_api_key_hash ON projects (api_key_hash);

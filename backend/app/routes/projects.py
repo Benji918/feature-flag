@@ -47,7 +47,10 @@ def create_project(body: ProjectCreate, request: Request):
     try:
         # A fresh 256-bit key colliding with an existing hash is
         # cosmologically unlikely; UNIQUE would reject it, so retry with a
-        # new key rather than fail the creation.
+        # new key rather than fail the creation. Retry ONLY the hash
+        # collision: sqlite3 uses one exception class for every constraint,
+        # so anything else (a future NOT NULL/CHECK/FK on this table) must
+        # propagate instead of being retried into a misleading 500 about keys.
         for _ in range(3):
             raw, digest = _mint_key()
             try:
@@ -57,7 +60,9 @@ def create_project(body: ProjectCreate, request: Request):
                     (user["id"], name, repo_url, digest),
                 )
                 break
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as e:
+                if "projects.api_key_hash" not in str(e):
+                    raise
                 continue
         else:
             return JSONResponse(status_code=500, content={"detail": "Could not issue a unique key"})
