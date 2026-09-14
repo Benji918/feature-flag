@@ -48,8 +48,10 @@ flag → project with all fields (04), audit → project + flag (05), per-projec
 key uniqueness (06), audit surviving its flag's delete (07), and live FK
 enforcement (08), plus the storage-level rollout range CHECK.
 
-`python3 backend/verify_schema.py` runs the same claims as a standalone
-check script (no test runner needed).
+`python3 backend/verify_schema.py` is a thin wrapper that runs that same
+suite with no test runner needed — all assertions live in `test_schema.py`
+only, so a schema change is made once and both entry points stay in agreement
+by construction.
 
 To use a different path: `python3 backend/create_db.py /tmp/my.db`.
 

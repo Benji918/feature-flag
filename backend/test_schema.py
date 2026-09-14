@@ -10,7 +10,9 @@ of the ticket's acceptance criteria as an assertion:
   05  audit row references BOTH project and flag
   06  same key across projects OK, duplicate within one project rejected
   07  audit history survives (RESTRICT blocks deleting a flag with history)
-  08  foreign keys enforced on a plain sqlite3 connection
+  08  FK clauses reject orphans on a connection that opts in via
+        PRAGMA foreign_keys = ON (per-connection; the schema file cannot
+        enable enforcement itself, so unpragmad connections stay unchecked)
   +   rollout_percentage range CHECK enforced at the storage layer
 
 Run from the repo root:
@@ -192,6 +194,10 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(surviving, 1)
 
     def test_08_orphan_project_rejected(self):
+        # Proves the REFERENCES clauses bite GIVEN the per-connection pragma
+        # from setUp -- not that a bare connection without it is safe (it is
+        # not: SQLite defaults enforcement to OFF, and no schema file can
+        # change that for other connections).
         with self.assertRaises(sqlite3.IntegrityError):
             self.cur.execute(
                 "INSERT INTO projects (user_id, name, api_key_hash) VALUES (?, ?, ?)",
