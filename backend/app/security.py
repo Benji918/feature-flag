@@ -14,7 +14,7 @@ import jwt
 ALGORITHM = "HS256"
 ACCESS_TTL_SECONDS = 3600
 REFRESH_TTL_SECONDS = 7 * 24 * 3600
-_DEV_SECRET = "dev-only-insecure-secret"
+_DEV_SECRET = os.environ.get("DATACHESS_JWT_SECRET", "dev-only-insecure-secret")
 
 # Verifying a wrong password against a real bcrypt hash costs ~0.3s; verifying
 # against nothing would be instant, leaking "email not registered" via timing.
