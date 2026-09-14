@@ -1,0 +1,18 @@
+[project]
+name = "feature-flag"
+version = "0.1.0"
+description = "DataChess — feature flag and progressive rollout platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.4",
+    "httpx==0.28.1",
+    "PyJWT==2.7.0",
+    "bcrypt==3.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==7.4.4",
+]

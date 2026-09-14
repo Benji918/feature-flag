@@ -131,6 +131,18 @@ class SchemaTest(unittest.TestCase):
         rows = list(self.conn.execute("SELECT * FROM projects"))
         self.assertNotIn(raw_key, str(rows))
 
+    def test_key_hash_unique_at_storage(self):
+        # Project-sprint AC04: one key identifies exactly one project,
+        # enforced by the storage layer -- a duplicate hash inserted directly
+        # (no application code involved) must be refused.
+        uid = self._make_user()
+        _, _, key_hash = self._make_project(uid, name="proj-a")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.cur.execute(
+                "INSERT INTO projects (user_id, name, api_key_hash) VALUES (?, ?, ?)",
+                (uid, "proj-b", key_hash),
+            )
+
     def test_04_flag_belongs_to_project(self):
         uid = self._make_user()
         pid, _, _ = self._make_project(uid)

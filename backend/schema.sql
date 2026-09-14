@@ -24,7 +24,12 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT NOT NULL,
     repo_url TEXT NULL,
     -- SHA-256 hex of the API key. The raw key is never stored anywhere.
-    api_key_hash TEXT NOT NULL,
+    -- UNIQUE for two reasons at once: one key must identify exactly one
+    -- project (two projects sharing a key would leave evaluate/sync with no
+    -- correct tenant to serve), and the uniqueness index is what makes that
+    -- per-request hash lookup fast. Enforced here, not in application code,
+    -- so no race or code path can create the ambiguity.
+    api_key_hash TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

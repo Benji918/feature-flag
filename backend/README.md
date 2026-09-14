@@ -60,13 +60,46 @@ seed/demo data, indexes beyond the uniqueness rules above.
 
 ---
 
+# Project sprint — create / list / detail + one-time machine key
+
+Layout from this sprint on: endpoints in `backend/app/routes/` (`auth.py`,
+`projects.py`), request/response shapes in `backend/app/schemas/`,
+dashboard identity in `backend/app/routes/deps.py`. `app/main.py` is assembly
+only. Auth behavior is unchanged by the move (one deliberate tightening: all
+`/auth/me` refusals now share one message, not two).
+
+- `POST /projects` `{name, repo_url?}` → `{id, name, repo_url, api_key}`
+  (raw key exactly once; empty/blank/missing name refused; unauthenticated 401)
+- `GET /projects` → own projects only, key-free shapes
+- `GET /projects/{id}` → `{id, name, repo_url, created_at, flags: []}`
+
+Decisions worth knowing later:
+
+- **One-time key:** the raw key exists in one response. The list/detail shapes
+  have no key field by construction, only the SHA-256 hex is stored, and no
+  endpoint re-displays it. Key generation retries on the (near-impossible)
+  hash collision instead of 500ing.
+- **`api_key_hash` is `UNIQUE` at the storage layer** (added this sprint):
+  one key identifies exactly one project, and the uniqueness index serves the
+  per-request hash lookup that evaluate/sync will need. Enforced by SQLite,
+  not by a check — a direct duplicate insert is refused.
+- **Tenancy refusals are 404s:** wrong owner and missing project return the
+  identical `{"detail": "Project not found"}`; only a missing/invalid token
+  is 401. Owner-only for now — platform-wide admin listing is Phase 3.
+- **Flag object shape is fixed here** (`key, description, enabled,
+  rollout_percentage, default_value, timestamps`) so flag tickets reuse it.
+
+Tests: `python3 -m pytest backend/app/tests/test_projects.py -v` (AC01/02/03/05/06; AC04 in `test_schema.py`).
+
+---
+
 # Auth sprint — register / login / me (dashboard human auth)
 
 First sprint's tables are reused as-is (`users`); no schema change.
 
 ```bash
-pip install -r backend/requirements.txt
-uvicorn backend.app.main:app --reload
+uv sync
+uv run uvicorn backend.app.main:app --reload
 ```
 
 - `POST /auth/register` `{email, password}` → `{access_token, refresh_token, token_type}`
