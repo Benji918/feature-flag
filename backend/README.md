@@ -82,7 +82,11 @@ Decisions worth knowing later:
 - **`api_key_hash` is `UNIQUE` at the storage layer** (added this sprint):
   one key identifies exactly one project, and the uniqueness index serves the
   per-request hash lookup that evaluate/sync will need. Enforced by SQLite,
-  not by a check — a direct duplicate insert is refused.
+  not by a check — a direct duplicate insert is refused. It is a standalone
+  `CREATE UNIQUE INDEX` (not inline `UNIQUE`) on purpose: `CREATE TABLE IF
+  NOT EXISTS` never upgrades an existing table, so the inline form would
+  silently miss every database created before it. The index statement runs on
+  every connect and lands on old databases too.
 - **Tenancy refusals are 404s:** wrong owner and missing project return the
   identical `{"detail": "Project not found"}`; only a missing/invalid token
   is 401. Owner-only for now — platform-wide admin listing is Phase 3.

@@ -6,8 +6,6 @@ used as identity, deleted user) collapses to None; routes turn that into
 purpose: only token problems are auth failures -- anything else surfaces.
 """
 
-import sqlite3
-
 import jwt
 from fastapi import Request
 from fastapi.security import HTTPBearer
@@ -29,7 +27,7 @@ def _bearer_token(request: Request) -> str | None:
     return token.strip()
 
 
-def current_user(request: Request) -> sqlite3.Row | None:
+def current_user(request: Request) -> dict | None:
     token = _bearer_token(request)
     if token is None:
         return None
@@ -41,8 +39,12 @@ def current_user(request: Request) -> sqlite3.Row | None:
         return None
     conn = db.connect()
     try:
-        return conn.execute(
+        row = conn.execute(
             "SELECT id, email, is_admin FROM users WHERE id = ?", (payload.get("sub"),)
         ).fetchone()
     finally:
         conn.close()
+    # Materialize to a plain dict while the connection is open. A sqlite3.Row
+    # happens to survive close() on this build (verified), but it is a view
+    # into statement state, not owned data -- no caller should depend on that.
+    return dict(row) if row is not None else None

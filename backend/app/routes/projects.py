@@ -79,11 +79,15 @@ def list_projects(request: Request):
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
     conn = db.connect()
     try:
-        rows = conn.execute(
-            "SELECT id, name, repo_url, created_at FROM projects"
-            " WHERE user_id = ? ORDER BY id",
-            (user["id"],),
-        ).fetchall()
+        # dict() while open: own the values, never read Rows after close.
+        rows = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT id, name, repo_url, created_at FROM projects"
+                " WHERE user_id = ? ORDER BY id",
+                (user["id"],),
+            ).fetchall()
+        ]
     finally:
         conn.close()
     return [
@@ -99,19 +103,24 @@ def project_detail(project_id: int, request: Request):
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
     conn = db.connect()
     try:
-        proj = conn.execute(
+        proj_row = conn.execute(
             "SELECT id, user_id, name, repo_url, created_at FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
         # Not yours or not there: same 404, same body. Existence stays hidden.
-        if proj is None or proj["user_id"] != user["id"]:
+        if proj_row is None or proj_row["user_id"] != user["id"]:
             return JSONResponse(status_code=404, content=_NOT_FOUND)
-        flags = conn.execute(
-            "SELECT \"key\", description, enabled, rollout_percentage, default_value,"
-            " created_at, definition_updated_at FROM feature_flags"
-            " WHERE project_id = ? ORDER BY \"key\"",
-            (project_id,),
-        ).fetchall()
+        # dict() while open (see deps.current_user): own the values.
+        proj = dict(proj_row)
+        flags = [
+            dict(f)
+            for f in conn.execute(
+                "SELECT \"key\", description, enabled, rollout_percentage, default_value,"
+                " created_at, definition_updated_at FROM feature_flags"
+                " WHERE project_id = ? ORDER BY \"key\"",
+                (project_id,),
+            ).fetchall()
+        ]
     finally:
         conn.close()
     return {

@@ -226,6 +226,66 @@ class SchemaTest(unittest.TestCase):
                 (pid, "bad-rollout", "out of range", 0, 101),
             )
 
+    def test_key_hash_index_lands_on_pre_existing_db(self):
+        # Project-sprint migration finding: CREATE TABLE IF NOT EXISTS never
+        # upgrades an old table, so an old-shape database (projects without
+        # the unique index) must gain the guarantee when app code connects --
+        # not just fresh builds. Simulated by creating the old shape (schema
+        # minus the index statement), then connecting through app.db, which
+        # re-applies the full schema on every connection.
+        import os
+        import sys
+
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+        from app import db as app_db
+
+        old_db = str(pathlib.Path(self.tmp.name) / "old.db")
+        old_schema = SCHEMA_PATH.read_text(encoding="utf-8").replace(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_api_key_hash"
+            " ON projects (api_key_hash);",
+            "",
+        )
+        self.assertNotEqual(old_schema, SCHEMA_PATH.read_text(encoding="utf-8"))
+        raw = sqlite3.connect(old_db)
+        raw.execute("PRAGMA foreign_keys = ON;")
+        raw.executescript(old_schema)
+        raw.execute(
+            "INSERT INTO users (email, hashed_password) VALUES (?, ?)", ("o@x.com", "h")
+        )
+        raw.execute(
+            "INSERT INTO projects (user_id, name, api_key_hash) VALUES (?, ?, ?)",
+            (1, "legacy", "ab" * 32),
+        )
+        raw.commit()
+        raw.close()
+
+        os.environ["DATACHESS_DB_PATH"] = old_db
+        try:
+            migrated = app_db.connect()
+            try:
+                indexes = [
+                    r[0]
+                    for r in migrated.execute(
+                        "SELECT name FROM sqlite_master"
+                        " WHERE type = 'index' AND tbl_name = 'projects'"
+                    ).fetchall()
+                ]
+            finally:
+                migrated.close()
+        finally:
+            del os.environ["DATACHESS_DB_PATH"]
+        self.assertIn("idx_projects_api_key_hash", indexes)
+        # ...and the guarantee is live, not just present:
+        dup = sqlite3.connect(old_db)
+        try:
+            with self.assertRaises(sqlite3.IntegrityError):
+                dup.execute(
+                    "INSERT INTO projects (user_id, name, api_key_hash) VALUES (?, ?, ?)",
+                    (1, "copycat", "ab" * 32),
+                )
+        finally:
+            dup.close()
+
 
 if __name__ == "__main__":
     unittest.main()
