@@ -16,7 +16,7 @@ of the ticket's acceptance criteria as an assertion:
   +   rollout_percentage range CHECK enforced at the storage layer
 
 Run from the repo root:
-    python3 -m pytest backend/test_schema.py -v
+    python3 -m pytest backend/app/tests/test_schema.py -v
     # or without pytest:
     python3 -m unittest backend.test_schema -v
 """
