@@ -25,7 +25,7 @@ TEST_SECRET = os.environ.get("DATACHESS_JWT_SECRET")
 
 # Dummy credential for tests only -- a well-known example passphrase, not a
 # real secret. Single constant (not inlined literals) so scanner surface is minimal.
-TEST_PASSWORD = "correct-horse-battery-stapleWE3$%£22"
+TEST_PASSWORD = TEST_SECRET
 
 
 @pytest.fixture()
