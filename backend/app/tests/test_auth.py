@@ -148,7 +148,7 @@ def test_register_race_returns_400_not_500(client, monkeypatch):
     # constraint is the atomic guard -- it must map to the AC05 refusal.
     import types
 
-    import app.main as main_module
+    import app.routes.auth as auth_routes
 
     class _Empty:
         def fetchone(self):
@@ -163,7 +163,7 @@ def test_register_race_returns_400_not_500(client, monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(main_module, "db", types.SimpleNamespace(connect=lambda: _RaceConn()))
+    monkeypatch.setattr(auth_routes, "db", types.SimpleNamespace(connect=lambda: _RaceConn()))
     r = client.post("/auth/register", json={"email": "racer@example.com", "password": TEST_PASSWORD})
     assert r.status_code == 400
     assert "in use" in r.json()["detail"].lower()

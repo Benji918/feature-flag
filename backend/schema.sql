@@ -66,3 +66,14 @@ CREATE TABLE IF NOT EXISTS audit_log_entries (
     new_value TEXT NOT NULL,
     "timestamp" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- One key identifies exactly one project: two projects sharing a hash would
+-- leave evaluate/sync with no correct tenant to serve, so the constraint
+-- lives in storage, not application code. It is a standalone CREATE INDEX
+-- (not inline UNIQUE) on purpose: CREATE TABLE IF NOT EXISTS never upgrades
+-- an existing table, so an inline constraint would silently miss every
+-- database created before it. This statement runs on every connect and lands
+-- on old and new databases alike. If it ever fails, an old database already
+-- holds duplicate hashes -- genuinely ambiguous data that must be repaired
+-- by hand, and failing loudly is the correct response to that.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_api_key_hash ON projects (api_key_hash);
