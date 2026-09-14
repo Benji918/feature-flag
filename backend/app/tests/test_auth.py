@@ -12,7 +12,7 @@ per connection, so monkeypatched env just works) and a fixed JWT secret.
 import pathlib
 import sqlite3
 import sys
-
+import os
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from app.main import app  # noqa: E402
 from app import security  # noqa: E402
 
-TEST_SECRET = "test-secret-not-production"
+TEST_SECRET = os.environ.get("DATACHESS_JWT_SECRET")
 
 
 @pytest.fixture()
