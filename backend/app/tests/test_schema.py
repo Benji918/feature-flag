@@ -16,7 +16,7 @@ of the ticket's acceptance criteria as an assertion:
   +   rollout_percentage range CHECK enforced at the storage layer
 
 Run from the repo root:
-    python3 -m pytest backend/test_schema.py -v
+    python3 -m pytest backend/app/tests/test_schema.py -v
     # or without pytest:
     python3 -m unittest backend.test_schema -v
 """
@@ -28,7 +28,7 @@ import sqlite3
 import tempfile
 import unittest
 
-SCHEMA_PATH = pathlib.Path(__file__).resolve().parent / "schema.sql"
+SCHEMA_PATH = pathlib.Path(__file__).resolve().parents[2] / "schema.sql"
 
 EXPECTED_COLUMNS = {
     "users": ["id", "email", "hashed_password", "is_admin", "created_at"],

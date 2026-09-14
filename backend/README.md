@@ -38,10 +38,10 @@ layer must too.
 ## Verification: round-trip claims, not just table names
 
 ```bash
-python3 -m pytest backend/test_schema.py -v
+python3 -m pytest backend/app/tests/test_schema.py -v
 ```
 
-`backend/test_schema.py` (stdlib `unittest`, runs under `pytest` or
+`backend/app/tests/test_schema.py` (stdlib `unittest`, runs under `pytest` or
 `python3 -m unittest`) builds a fresh DB from `schema.sql` per test and proves:
 user write/read-back (02), project → user with hash-only key storage (03),
 flag → project with all fields (04), audit → project + flag (05), per-project
@@ -57,3 +57,51 @@ To use a different path: `python3 backend/create_db.py /tmp/my.db`.
 
 Out of scope for this sprint (intentionally absent): endpoints, query layer,
 seed/demo data, indexes beyond the uniqueness rules above.
+
+---
+
+# Auth sprint — register / login / me (dashboard human auth)
+
+First sprint's tables are reused as-is (`users`); no schema change.
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload
+```
+
+- `POST /auth/register` `{email, password}` → `{access_token, refresh_token, token_type}`
+- `POST /auth/login` `{email, password}` → same shape
+- `GET /auth/me` with `Authorization: Bearer <access token>` → `{id, email, is_admin}`
+  (access tokens only — a refresh token here is 401, so identity stays
+  bounded by the 1h lifetime)
+
+Decisions worth knowing later:
+
+- **Lifetimes:** access 1h, refresh 7d (both minted on register and login).
+  There is deliberately **no `/auth/refresh` endpoint** yet — refresh-token
+  rotation stays out of scope for this sprint; the refresh token is issued now
+  so that ticket has something to redeem. Minting it now (rather than later)
+  was the ticket's explicit open-question answer, made out loud here.
+- **No user enumeration:** wrong password and unknown email return the same
+  401 + `"Invalid email or password"` (unknown emails are verified against a
+  dummy bcrypt hash so timing doesn't leak either).
+- **Duplicate register** is 400 + `"Email already in use"` — including when
+  two concurrent registrations race: the pre-insert SELECT is only the fast
+  path, the `UNIQUE` constraint is the atomic guard, and its `IntegrityError`
+  maps to the same 400, never a 500.
+- **Passwords:** bcrypt over a SHA-256 pre-hash, so the full password counts
+  (bcrypt alone ignores everything past 72 bytes). Hashes from before this
+  change will not verify — dev/test data only, no production users exist.
+- **Admin can never come from register:** the body has no such field and the
+  insert hardcodes `is_admin = 0`; extra fields are ignored.
+- **All auth refusals are 401** (missing/malformed/invalid tokens included) —
+  tokens are parsed by hand, not via HTTPBearer, which would 403 on a missing
+  header.
+- **Secret:** `DATACHESS_JWT_SECRET` env; the code fallback is dev-only.
+- **DB:** `DATACHESS_DB_PATH` env (default `./datachess.db`); schema ensured
+  per connection, FK pragma per connection — same rules as the schema sprint.
+- Still no SDK/API-key paths here: dashboard (JWT) and machine (API key) auth
+  stay separate per the requirements doc, and evaluate/sync never touch these
+  routes.
+
+Tests: `python3 -m pytest backend/app/tests/test_auth.py -v` (AC01–07 + lifetimes + regressions).
