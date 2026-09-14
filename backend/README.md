@@ -57,3 +57,42 @@ To use a different path: `python3 backend/create_db.py /tmp/my.db`.
 
 Out of scope for this sprint (intentionally absent): endpoints, query layer,
 seed/demo data, indexes beyond the uniqueness rules above.
+
+---
+
+# Auth sprint — register / login / me (dashboard human auth)
+
+First sprint's tables are reused as-is (`users`); no schema change.
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload
+```
+
+- `POST /auth/register` `{email, password}` → `{access_token, refresh_token, token_type}`
+- `POST /auth/login` `{email, password}` → same shape
+- `GET /auth/me` with `Authorization: Bearer <token>` → `{id, email, is_admin}`
+
+Decisions worth knowing later:
+
+- **Lifetimes:** access 1h, refresh 7d (both minted on register and login).
+  There is deliberately **no `/auth/refresh` endpoint** yet — refresh-token
+  rotation stays out of scope for this sprint; the refresh token is issued now
+  so that ticket has something to redeem.
+- **No user enumeration:** wrong password and unknown email return the same
+  401 + `"Invalid email or password"` (unknown emails are verified against a
+  dummy bcrypt hash so timing doesn't leak either).
+- **Duplicate register** is 400 + `"Email already in use"`.
+- **Admin can never come from register:** the body has no such field and the
+  insert hardcodes `is_admin = 0`; extra fields are ignored.
+- **All auth refusals are 401** (missing/malformed/invalid tokens included) —
+  tokens are parsed by hand, not via HTTPBearer, which would 403 on a missing
+  header.
+- **Secret:** `DATACHESS_JWT_SECRET` env; the code fallback is dev-only.
+- **DB:** `DATACHESS_DB_PATH` env (default `./datachess.db`); schema ensured
+  per connection, FK pragma per connection — same rules as the schema sprint.
+- Still no SDK/API-key paths here: dashboard (JWT) and machine (API key) auth
+  stay separate per the requirements doc, and evaluate/sync never touch these
+  routes.
+
+Tests: `python3 -m pytest backend/test_auth.py -v` (AC01–07 + lifetimes).
