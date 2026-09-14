@@ -5,7 +5,10 @@
 -- Out of scope for this sprint: endpoints, query layer, seed/demo data,
 -- indexes beyond the uniqueness rules below.
 
-PRAGMA foreign_keys = ON;
+-- NOTE: no PRAGMA here on purpose. In SQLite, foreign_keys is a
+-- per-connection setting and is NOT persisted by schema scripts, so every
+-- connection must run `PRAGMA foreign_keys = ON;` itself (create_db.py and
+-- verify_schema.py both do; future query layers must too).
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +34,14 @@ CREATE TABLE IF NOT EXISTS feature_flags (
     "key" TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    -- Decision: rollout range is constrained HERE at the storage layer, not
+    -- only in application code. A CHECK survives buggy callers and hand-run
+    -- SQL; an app-level clamp (which the later PATCH ticket should still add
+    -- for good errors) does not. So if that ticket looks redundant next to
+    -- this line, keep both: the clamp is UX, this CHECK is the guarantee.
+    -- Do not remove this CHECK as "redundant" without a replacement at this
+    -- layer. (DESIGN.md, where this would normally live, is out of scope
+    -- for this sprint, so the reasoning is recorded here instead.)
     rollout_percentage INTEGER NOT NULL DEFAULT 0 CHECK (rollout_percentage >= 0 AND rollout_percentage <= 100),
     default_value INTEGER NOT NULL CHECK (default_value IN (0, 1)),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -39,10 +50,16 @@ CREATE TABLE IF NOT EXISTS feature_flags (
     UNIQUE (project_id, "key")
 );
 
+-- Delete behavior is an explicit decision, not a default:
+-- projects/flags cascade (a deleted owner takes its live rows), but audit
+-- rows NEVER cascade: history must not die silently with its flag/project.
+-- Deleting a referenced project/flag with history fails instead (RESTRICT),
+-- forcing explicit handling of the audit trail.
+
 CREATE TABLE IF NOT EXISTS audit_log_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    flag_id INTEGER NOT NULL REFERENCES feature_flags (id) ON DELETE CASCADE,
+    project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE RESTRICT,
+    flag_id INTEGER NOT NULL REFERENCES feature_flags (id) ON DELETE RESTRICT,
     actor TEXT NOT NULL,
     field_changed TEXT NOT NULL CHECK (field_changed IN ('enabled', 'rollout_percentage')),
     old_value TEXT NOT NULL,

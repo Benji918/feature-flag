@@ -11,6 +11,10 @@ datachess-sprint-requirements2.md Section 3 in place:
 users, projects, feature_flags, audit_log_entries.
 
 Stdlib only (sqlite3). No endpoints, no query layer, no seed data.
+
+NOTE: the post-apply check here asserts table presence only. Behavioral proof
+of the ticket's claims (round-trips, uniqueness, FK rejection, audit survival)
+lives in backend/verify_schema.py -- run it after this script.
 """
 
 import pathlib
