@@ -8,6 +8,7 @@ per connection, so monkeypatched env just works) and a fixed JWT secret.
 """
 
 import pathlib
+import secrets
 import sqlite3
 import sys
 import os
@@ -21,11 +22,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from app.main import app  # noqa: E402
 from app import security  # noqa: E402
 
-TEST_SECRET = os.environ.get("DATACHESS_JWT_SECRET")
+# Session-random signing secret: tests never depend on ambient env (which
+# previously masked the missing dev fallback -- the suite passed only where
+# DATACHESS_JWT_SECRET happened to be set). No hardcoded literal anywhere.
+TEST_SECRET = secrets.token_hex(32)
 
 # Dummy credential for tests only -- a well-known example passphrase, not a
 # real secret. Single constant (not inlined literals) so scanner surface is minimal.
-TEST_PASSWORD = TEST_SECRET
+TEST_PASSWORD = "correct-horse-battery-staple"
 
 
 @pytest.fixture()
@@ -35,7 +39,7 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def _register(client, email="owner@example.com", password="TEST_PASSWORD"):
+def _register(client, email="owner@example.com", password=TEST_PASSWORD):
     return client.post("/auth/register", json={"email": email, "password": password})
 
 
@@ -60,18 +64,18 @@ def test_01_register_returns_token(client):
 
 
 def test_02_password_never_stored_as_written(client):
-    _register(client, password="TEST_PASSWORD")
+    _register(client, password=TEST_PASSWORD)
     (uid, email, stored, is_admin, created) = _stored_user_row()
-    assert stored != "TEST_PASSWORD"
-    assert "TEST_PASSWORD" not in str(_stored_user_row())
+    assert stored != TEST_PASSWORD
+    assert TEST_PASSWORD not in str(_stored_user_row())
     assert stored.startswith("$2b$")  # bcrypt one-way hash
-    assert security.verify_password("TEST_PASSWORD", stored) is True
+    assert security.verify_password(TEST_PASSWORD, stored) is True
     assert security.verify_password("wrong-pw", stored) is False
 
 
 def test_03_login_returns_token(client):
     _register(client)
-    r = client.post("/auth/login", json={"email": "owner@example.com", "password": "TEST_PASSWORD"})
+    r = client.post("/auth/login", json={"email": "owner@example.com", "password": TEST_PASSWORD})
     assert r.status_code == 200, r.text
     payload = jwt.decode(r.json()["access_token"], TEST_SECRET, algorithms=["HS256"])
     assert payload["type"] == "access"
@@ -126,3 +130,58 @@ def test_token_lifetimes(client):
     assert access["exp"] - access["iat"] == 3600
     assert refresh["exp"] - refresh["iat"] == 7 * 24 * 3600
     assert body["token_type"] == "bearer"
+
+
+def test_dev_fallback_secret_when_env_unset(monkeypatch):
+    # Guards the default-config breakage: with no env var, the signing key
+    # must be a concrete dev value, never None (which 500s every mint/decode
+    # inside PyJWT key preparation).
+    monkeypatch.delenv("DATACHESS_JWT_SECRET", raising=False)
+    assert security._secret() == "dev-only-insecure-secret"
+    token = security.mint_token(1, "a@b.com", "access")
+    assert security.decode_token(token)["sub"] == "1"
+
+
+def test_register_race_returns_400_not_500(client, monkeypatch):
+    # Simulates losing a concurrent duplicate-registration race: the SELECT
+    # finds nothing, then the INSERT hits the UNIQUE constraint. The
+    # constraint is the atomic guard -- it must map to the AC05 refusal.
+    import types
+
+    import app.main as main_module
+
+    class _Empty:
+        def fetchone(self):
+            return None
+
+    class _RaceConn:
+        def execute(self, sql, params=()):
+            if sql.lstrip().upper().startswith("INSERT"):
+                raise sqlite3.IntegrityError("UNIQUE constraint failed: users.email")
+            return _Empty()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(main_module, "db", types.SimpleNamespace(connect=lambda: _RaceConn()))
+    r = client.post("/auth/register", json={"email": "racer@example.com", "password": TEST_PASSWORD})
+    assert r.status_code == 400
+    assert "in use" in r.json()["detail"].lower()
+
+
+def test_me_rejects_refresh_token(client):
+    # Identity is bounded by the 1h access lifetime; the 7d token is only for
+    # the future refresh flow and proves nothing here.
+    body = _register(client).json()
+    r = client.get("/auth/me", headers={"Authorization": f"Bearer {body['refresh_token']}"})
+    assert r.status_code == 401
+
+
+def test_passwords_past_72_bytes_fully_counted(client):
+    # bcrypt sees only 72 bytes; the SHA-256 pre-hash means the tail still
+    # counts -- same 72-byte prefix with a different tail must NOT verify.
+    prefix = "x" * 72
+    good, bad = prefix + "-tail-one", prefix + "-tail-two"
+    assert client.post("/auth/register", json={"email": "long@example.com", "password": good}).status_code == 200
+    assert client.post("/auth/login", json={"email": "long@example.com", "password": good}).status_code == 200
+    assert client.post("/auth/login", json={"email": "long@example.com", "password": bad}).status_code == 401

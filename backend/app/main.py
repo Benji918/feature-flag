@@ -2,7 +2,8 @@
 
   POST /auth/register  {email, password} -> {access_token, refresh_token, token_type}
   POST /auth/login     {email, password} -> {access_token, refresh_token, token_type}
-  GET  /auth/me        Bearer token      -> {id, email, is_admin}
+  GET  /auth/me        Bearer access token -> {id, email, is_admin}
+  (refresh tokens are minted but never accepted as identity proof)
 
 Refusals are all 401 (never 403), so missing/malformed/invalid tokens are
 indistinguishable by status. Login failures use one identical message for
@@ -11,6 +12,9 @@ Register never grants admin: the request body has no such field and the
 insert hardcodes is_admin = 0 on top of the column default.
 """
 
+import sqlite3
+
+import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -52,10 +56,17 @@ def register(body: AuthIn):
         exists = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         if exists:
             return JSONResponse(status_code=400, content={"detail": "Email already in use"})
-        cur = conn.execute(
-            "INSERT INTO users (email, hashed_password, is_admin) VALUES (?, ?, 0)",
-            (email, security.hash_password(body.password)),
-        )
+        try:
+            cur = conn.execute(
+                "INSERT INTO users (email, hashed_password, is_admin) VALUES (?, ?, 0)",
+                (email, security.hash_password(body.password)),
+            )
+        except sqlite3.IntegrityError:
+            # Lost a concurrent race: another registration of this email
+            # committed between our SELECT and INSERT. The UNIQUE constraint
+            # is the atomic guard, the SELECT only the fast path -- same AC05
+            # refusal either way, never a 500.
+            return JSONResponse(status_code=400, content={"detail": "Email already in use"})
         conn.commit()
         return _tokens(cur.lastrowid, email)
     finally:
@@ -96,9 +107,15 @@ def me(request: Request):
         return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
     try:
         payload = security.decode_token(token)
-    except Exception:
+    except jwt.InvalidTokenError:
+        # Narrow on purpose: only token problems become 401s. Anything else
+        # (e.g. a misconfigured signing key) must surface loudly, not hide
+        # behind "Invalid or expired token".
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
-    if payload.get("type") not in ("access", "refresh"):
+    if payload.get("type") != "access":
+        # Refresh tokens prove nothing here: identity is bounded by the 1h
+        # access lifetime, and the 7d token is only for the future refresh
+        # flow (out of scope this sprint).
         return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
     conn = db.connect()
     try:
