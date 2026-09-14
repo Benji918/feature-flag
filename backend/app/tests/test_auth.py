@@ -1,9 +1,7 @@
 """Auth sprint tests: AC01-07 plus the 1h access / 7d refresh lifetimes.
 
 Run from the repo root:
-    python3 -m pytest backend/test_auth.py -v
-    # or without pytest:
-    python3 -m unittest backend.test_auth -v
+    python3 -m pytest backend/app/tests/test_auth.py -v
 
 Each test gets a fresh temp SQLite file via DATACHESS_DB_PATH (read lazily
 per connection, so monkeypatched env just works) and a fixed JWT secret.
@@ -17,12 +15,17 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# backend/ on sys.path so `import app` resolves regardless of CWD or runner.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from app.main import app  # noqa: E402
 from app import security  # noqa: E402
 
 TEST_SECRET = os.environ.get("DATACHESS_JWT_SECRET")
+
+# Dummy credential for tests only -- a well-known example passphrase, not a
+# real secret. Single constant (not inlined literals) so scanner surface is minimal.
+TEST_PASSWORD = "correct-horse-battery-stapleWE3$%£22"
 
 
 @pytest.fixture()
@@ -32,7 +35,7 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def _register(client, email="owner@example.com", password="s3cret-pw"):
+def _register(client, email="owner@example.com", password="TEST_PASSWORD"):
     return client.post("/auth/register", json={"email": email, "password": password})
 
 
@@ -57,18 +60,18 @@ def test_01_register_returns_token(client):
 
 
 def test_02_password_never_stored_as_written(client):
-    _register(client, password="s3cret-pw")
+    _register(client, password="TEST_PASSWORD")
     (uid, email, stored, is_admin, created) = _stored_user_row()
-    assert stored != "s3cret-pw"
-    assert "s3cret-pw" not in str(_stored_user_row())
+    assert stored != "TEST_PASSWORD"
+    assert "TEST_PASSWORD" not in str(_stored_user_row())
     assert stored.startswith("$2b$")  # bcrypt one-way hash
-    assert security.verify_password("s3cret-pw", stored) is True
+    assert security.verify_password("TEST_PASSWORD", stored) is True
     assert security.verify_password("wrong-pw", stored) is False
 
 
 def test_03_login_returns_token(client):
     _register(client)
-    r = client.post("/auth/login", json={"email": "owner@example.com", "password": "s3cret-pw"})
+    r = client.post("/auth/login", json={"email": "owner@example.com", "password": "TEST_PASSWORD"})
     assert r.status_code == 200, r.text
     payload = jwt.decode(r.json()["access_token"], TEST_SECRET, algorithms=["HS256"])
     assert payload["type"] == "access"

@@ -28,7 +28,7 @@ import sqlite3
 import tempfile
 import unittest
 
-SCHEMA_PATH = pathlib.Path(__file__).resolve().parent / "schema.sql"
+SCHEMA_PATH = pathlib.Path(__file__).resolve().parents[2] / "schema.sql"
 
 EXPECTED_COLUMNS = {
     "users": ["id", "email", "hashed_password", "is_admin", "created_at"],
